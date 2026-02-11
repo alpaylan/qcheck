@@ -242,6 +242,28 @@ let gen_color =
      (1, (QCheck.Gen.pure `Green))] : color QCheck.Gen.t)
 ```
 
+### Overwrite weights
+
+If you wan't to specify your own weigth for one of the variants, you can
+add an attribute to the type.
+
+For instance, the following will never generate any `Blue` variant:
+```ocaml
+type color =
+  | Red
+  | Blue [@weight 0]
+  | Green
+[@@deriving qcheck]
+
+(* ==> *)
+
+let gen_color =
+  QCheck.Gen.oneof_weighted
+    [(1, (QCheck.Gen.pure Red));
+     (0, (QCheck.Gen.pure Blue));
+     (1, (QCheck.Gen.pure Green))]
+```
+
 ## Recursive variants
 * Recursive variants
 ```ocaml
