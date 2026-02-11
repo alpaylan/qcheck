@@ -244,7 +244,7 @@ let gen_color =
 
 ### Overwrite weights
 
-If you wan't to specify your own weigth for one of the variants, you can
+If you wan't to specify your own weight for one of the variants, you can
 add an attribute to the type.
 
 For instance, the following will never generate any `Blue` variant:
