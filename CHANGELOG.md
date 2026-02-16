@@ -53,6 +53,7 @@
   - `Observable.map`
   - `TestResult.stats` `TestResult.warnings` `TestResult.collect`
 - Clarify documentation for the `int*` and `nat*` generators
+- Disabled duplicated pretty-printed feedback when using `QCheck_alcotest` runner
 
 
 ## 0.91 (2025-12-21)
