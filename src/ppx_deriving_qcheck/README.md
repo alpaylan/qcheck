@@ -264,6 +264,8 @@ let gen_color =
      (1, (QCheck.Gen.pure Green))]
 ```
 
+The `weight` attribute can also be handy to disable generation of a variant by annotating it with `[@weight 0]`.
+
 ## Recursive variants
 * Recursive variants
 ```ocaml
