@@ -247,11 +247,11 @@ let gen_color =
 If you want to specify your own weight for one of the variants, you can
 add an attribute to the type.
 
-For instance, the following will never generate any `Blue` variant:
+For instance, the following will generate a `Blue` variant twice as often as a `Red` or `Green` variant:
 ```ocaml
 type color =
   | Red
-  | Blue [@weight 0]
+  | Blue [@weight 2]
   | Green
 [@@deriving qcheck]
 
@@ -260,7 +260,7 @@ type color =
 let gen_color =
   QCheck.Gen.oneof_weighted
     [(1, (QCheck.Gen.pure Red));
-     (0, (QCheck.Gen.pure Blue));
+     (2, (QCheck.Gen.pure Blue));
      (1, (QCheck.Gen.pure Green))]
 ```
 
