@@ -1586,6 +1586,7 @@ module Test = struct
     stats : 'a stat list; (* distribution of values of type 'a *)
     qcheck1_shrink : ('a -> ('a -> unit) -> unit) option; (* QCheck1-backward-compatible shrinking *)
     if_assumptions_fail: [`Fatal | `Warning] * float;
+    mutable gen_time : float option; (* time spent generating instances, if available *)
     mutable name : string; (* name of the law *)
   }
 
@@ -1610,6 +1611,8 @@ module Test = struct
   let get_long_factor {long_factor; _} = long_factor
 
   let get_positive {positive; _} = positive
+
+  let get_gen_time {gen_time; _} = gen_time
 
   let default_count = 100
 
@@ -1641,6 +1644,7 @@ module Test = struct
     let long_factor = global_long_factor long_factor in
     let positive = not negative in
     let max_gen = match max_gen with None -> count + 200 | Some x->x in
+    let gen_time = Some 0.0 in
     {
       law;
       gen;
@@ -1656,6 +1660,7 @@ module Test = struct
       positive;
       if_assumptions_fail;
       qcheck1_shrink = None;
+      gen_time;
     }
 
   let make_cell_from_QCheck1 ?(if_assumptions_fail=default_if_assumptions_fail)
@@ -1683,6 +1688,7 @@ module Test = struct
       positive;
       if_assumptions_fail;
       qcheck1_shrink = shrink;
+      gen_time = None;
     }
 
   let make' ?if_assumptions_fail ?count ?long_factor ?max_gen ?max_fail ?retries ?name ?print ?collect ?stats ~negative arb law =
@@ -1743,7 +1749,13 @@ module Test = struct
   let new_input_tree state =
     state.res.R.count_gen <- state.res.R.count_gen + 1;
     state.cur_max_gen <- state.cur_max_gen - 1;
-    state.test.gen state.rand
+    let t0 = Sys.time () in
+    let gen = state.test.gen state.rand in
+    let t1 = Sys.time () in
+    state.test.gen_time <- Some (match state.test.gen_time with
+      | None -> t1 -. t0
+      | Some prev -> prev +. (t1 -. t0));
+    gen
 
   (* statistics on inputs *)
   let collect st i = match st.test.collect with

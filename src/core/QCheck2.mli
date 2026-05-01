@@ -1850,6 +1850,9 @@ module Test : sig
   val get_positive : _ cell -> bool
   (** Get the expected mode of a cell: positive indicates expected to satisfy the tested property, negative indicates expected not to satisfy the tested property.  *)
 
+  val get_gen_time : _ cell -> float option
+  (** Get the time spent generating values for this cell *)
+
   type t = Test : 'a cell -> t
   (** Same as ['a cell], but masking the type parameter. This allows to
       put tests on different types in the same list of tests. *)
