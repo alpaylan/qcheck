@@ -51,7 +51,7 @@ all rights reserved.
       let test = QCheck.(
           Test.make
             ~count:10_000 ~max_fail:3
-            (list small_nat)
+            (list nat_small)
             (fun l -> l = List.sort compare l));;
       QCheck.Test.check_exn test;;
     ]}
@@ -69,7 +69,7 @@ all rights reserved.
                             (fun self n -> match n with
                                | 0 -> map leaf nat
                                | n ->
-                                 frequency
+                                 oneof_weighted
                                    [1, map leaf nat;
                                     2, map2 node (self (n/2)) (self (n/2))]
                             ))
@@ -150,13 +150,21 @@ module Gen : sig
   (** Synonym for {!return}
       @since 0.8 *)
 
-  val (>>=) : 'a t -> ('a -> 'b t) -> 'b t
+  val bind : 'a t -> ('a -> 'b t) -> 'b t
   (** Monadic bind for writing dependent generators. First generates an ['a] and then
-      passes it to the given function, to generate a ['b]. *)
+      passes it to the given function, to generate a ['b].
+
+      @since 0.90 *)
+
+  val (>>=) : 'a t -> ('a -> 'b t) -> 'b t
+  (** Synonym for {!bind} since 0.90 *)
+
+  val ap : ('a -> 'b) t -> 'a t -> 'b t
+  (** Applicative operator for composing a function generator and an argument generator
+      into a result generator. *)
 
   val (<*>) : ('a -> 'b) t -> 'a t -> 'b t
-  (** Infix operator for composing a function generator and an argument generator
-      into a result generator. *)
+  (** Synonym for {!ap} since 0.90 *)
 
   val map : ('a -> 'b) -> 'a t -> 'b t
   (** [map f g] transforms a generator [g] by applying [f] to each generated element. *)
@@ -196,33 +204,40 @@ module Gen : sig
   (** Constructs a generator that selects among a given list of generators.
       @raise Invalid_argument or Failure if list is empty *)
 
-  val oneofl : 'a list -> 'a t
+  val oneof_list : 'a list -> 'a t
   (** Constructs a generator that selects among a given list of values.
-      @raise Invalid_argument or Failure if list is empty *)
+      @raise Invalid_argument or Failure if list is empty
+      @since 0.90 *)
 
-  val oneofa : 'a array -> 'a t
+  val oneof_array : 'a array -> 'a t
   (** Constructs a generator that selects among a given array of values.
-      @raise Invalid_argument or Failure if list is empty *)
+      @raise Invalid_argument or Failure if list is empty
+      @since 0.90 *)
 
-  val frequency : (int * 'a t) list -> 'a t
+  val oneof_weighted : (int * 'a t) list -> 'a t
   (** Constructs a generator that selects among a given list of generators.
-      Each of the given generators are chosen based on a positive integer weight. *)
+      Each of the given generators are chosen based on a positive integer weight.
+      @since 0.90 *)
 
-  val frequencyl : (int * 'a) list -> 'a t
+  val oneof_list_weighted : (int * 'a) list -> 'a t
   (** Constructs a generator that selects among a given list of values.
-      Each of the given values are chosen based on a positive integer weight. *)
+      Each of the given values are chosen based on a positive integer weight.
+      @since 0.90 *)
 
-  val frequencya : (int * 'a) array -> 'a t
+  val oneof_array_weighted : (int * 'a) array -> 'a t
   (** Constructs a generator that selects among a given array of values.
-      Each of the array entries are chosen based on a positive integer weight. *)
+      Each of the array entries are chosen based on a positive integer weight.
+      @since 0.90 *)
 
-  val shuffle_a : 'a array -> unit t
-  (** Shuffles the array in place. *)
+  val shuffle_array : 'a array -> 'a array t
+  (** Creates a generator of shuffled arrays.
+      @since 0.90 *)
 
-  val shuffle_l : 'a list -> 'a list t
-  (** Creates a generator of shuffled lists. *)
+  val shuffle_list : 'a list -> 'a list t
+  (** Creates a generator of shuffled lists.
+      @since 0.90 *)
 
-  val shuffle_w_l : (int * 'a) list -> 'a list t
+  val shuffle_list_weighted : (int * 'a) list -> 'a list t
   (** Creates a generator of weighted shuffled lists. A given list is shuffled on each
       generation according to the weights of its elements. An element with a larger weight
       is more likely to be at the front of the list than an element with a smaller weight.
@@ -233,8 +248,7 @@ module Gen : sig
       more likely to generate [["ten"; "five"; "one"]] or [["five"; "ten"; "one"]] than
       [["one"; "ten"; "five"]] because "ten" and "five" have larger weights than "one".
 
-      @since 0.11
-  *)
+      @since 0.90 *)
 
   val range_subset : size:int -> int -> int -> int array t
   (** [range_subset ~size:k low high] generates an array of length [k]
@@ -268,9 +282,9 @@ module Gen : sig
 
   val float : float t   (** Generates floating point numbers. *)
 
-  val pfloat : float t (** Generates positive floating point numbers (0. included). *)
+  val float_pos : float t (** Generates positive floating point numbers (0. included). *)
 
-  val nfloat : float t (** Generates negative floating point numbers. (-0. included) *)
+  val float_neg : float t (** Generates negative floating point numbers (-0. included). *)
 
   val float_bound_inclusive : float -> float t
   (** [float_bound_inclusive bound] returns a random floating-point number between 0 and
@@ -293,36 +307,47 @@ module Gen : sig
   (** Synonym for [float_range]
       @since 0.11 *)
 
-  val exponential : float -> float t
-  (** [exponential m] generates floating-point numbers following an exponential
+  val float_exp : float -> float t
+  (** [float_exp m] generates floating-point numbers following an exponential
       distribution with a mean of [m].
       @raise Invalid_argument if [m] is NaN.
+      @since 0.90 *)
+
+  val exponential : float -> float t
+  (** Synonym for {!float_exp}.
       @since 0.23 *)
 
-  val nat : int t (** Generates small natural numbers. *)
+  val nat : int t
+  (** Generates small natural numbers ([0] included). *)
 
-  val big_nat : int t
-  (** Generates natural numbers, possibly large.
-      @since 0.10 *)
+  val int_pos_mid : int t
+  (** Generates small natural numbers ([0] included).
+      Synonym for {!nat}.
+      @since 0.90 *)
 
-  val neg_int : int t
-  (** Generates non-strictly negative integers (0 included). *)
+  val int_neg : int t
+  (** Generates strictly negative integers uniformly (0 excluded).
+      @since 0.90 *)
 
-  val pint : int t (** Generates non-strictly positive integers uniformly (0 included). *)
+  val int_pos : int t
+  (** Generates positive integers uniformly (0 included).
+      @since 0.90 *)
 
-  val int : int t (** Generates integers uniformly. *)
+  val int : int t
+  (** Generates integers uniformly. *)
 
-  val small_nat : int t
-  (** Small integers (< 100)
-      @since 0.5.1 *)
+  val int_small : int t
+  (** Generates small signed integers.
+      @since 0.90 *)
 
-  val small_int : int t
-  (** Small UNSIGNED integers, for retrocompatibility.
-      @deprecated use {!small_nat}. *)
+  val int_pos_small : int t
+  (** Generates small positive integers (< 100, [0] included)
+      @since 0.90 *)
 
-  val small_signed_int : int t
-  (** Small SIGNED integers, based on {!small_nat}.
-      @since 0.5.2 *)
+  val nat_small : int t
+  (** Generates small positive integers (< 100, [0] included)
+      Synonym for {!int_pos_small}.
+      @since 0.90 *)
 
   val int_bound : int -> int t
   (** Uniform integer generator producing integers between [0] and [bound]
@@ -345,13 +370,14 @@ module Gen : sig
 
       @since 0.6 *)
 
-  val int_pos_corners : int list
-  (** Non-negative corner cases for int.
-      @since 0.6 *)
+  val int_small_corners : unit -> int t
+  (** As [int_small], but each newly created generator starts with
+      a list of corner cases before falling back on random generation.
 
-  val int_corners : int list
-  (** All corner cases for int.
-      @since 0.6 *)
+      Note that [int_small_corners ()] is stateful, meaning that once the list of
+      corner cases has been emitted, subsequent calls will not reproduce them.
+
+      @since 0.90 *)
 
   val (--) : int -> int -> int t (** Synonym for {!int_range}. *)
 
@@ -363,24 +389,11 @@ module Gen : sig
   (** Generates [int64] values uniformly.
       @since 0.24 *)
 
-  val ui32 : int32 t
-  (** Generates [int32] values.
-      @deprecated use {!val:int32} instead, the name is wrong, values {i are} signed.
-  *)
-
-  val ui64 : int64 t
-  (** Generates [int64] values.
-      @deprecated use {!val:int64} instead, the name is wrong, values {i are} signed.
-  *)
-
   val list : 'a t -> 'a list t
   (** Builds a list generator from an element generator. List size is generated by {!nat}. *)
 
   val list_size : int t -> 'a t -> 'a list t
   (** Builds a list generator from a (non-negative) size generator and an element generator. *)
-
-  val list_repeat : int -> 'a t -> 'a list t
-  (** [list_repeat i g] builds a list generator from exactly [i] elements generated by [g]. *)
 
   val array : 'a t -> 'a array t
   (** Builds an array generator from an element generator. Array size is generated by {!nat}. *)
@@ -388,21 +401,12 @@ module Gen : sig
   val array_size : int t -> 'a t -> 'a array t
   (** Builds an array generator from a (non-negative) size generator and an element generator. *)
 
-  val array_repeat : int -> 'a t -> 'a array t
-  (** [array_repeat i g] builds an array generator from exactly [i] elements generated by [g]. *)
-
   val option : ?ratio:float -> 'a t -> 'a option t
   (** An option generator, with optional ratio.
       @param ratio a float between [0.] and [1.] indicating the probability of a sample to be [Some _]
       rather than [None].
 
-      @since 0.19 (renamed from [opt])
-  *)
-
-  val opt : ?ratio:float -> 'a t -> 'a option t
-  (** [opt] is an alias of {!val:option} for backward compatibility.
-
-      @since 0.18 ([?ratio] parameter)
+      @since 0.19
   *)
 
   val result : ?ratio:float -> 'a t -> 'e t -> ('a, 'e) result t
@@ -416,25 +420,41 @@ module Gen : sig
   val char : char t
   (** Generates characters upto character code 255. *)
 
-  val printable : char t (** Generates printable ascii characters - either '\n' or in the range 32 to 126, inclusive *)
+  val char_printable : char t
+  (** Generates printable ascii characters - either '\n' or in the range 32 to 126, inclusive.
+      @since 0.90 *)
 
-  val numeral : char t (** Generates numeral characters. *)
+  val printable : char t
+  (** Synonym for {!char_printable}. *)
+
+  val char_numeral : char t
+  (** Generates numeral characters uniformly distributed over ['0'..'9'].
+      @since 0.90 *)
+
+  val numeral : char t
+  (** Synonym for {!char_numeral}. *)
 
   val char_range : char -> char -> char t
   (** Generates chars between the two bounds, inclusive.
       Example: [char_range 'a' 'z'] for all lower case ascii letters.
       @since 0.13 *)
 
-  val bytes_size : ?gen:char t -> int t -> bytes t
+  val bytes_size : int t -> bytes t
   (** Builds a bytes generator from a (non-negative) size generator.
-      Accepts an optional character generator (the default is {!char}).
+      Characters are generated by {!char}.
       @since 0.20 *)
 
-  val bytes : ?gen:char t -> bytes t
-  (** Builds a bytes generator. Bytes size is generated by {!nat}.
-      Accepts an optional character generator (the default is {!char}).
-      See also {!bytes_of} and {!bytes_printable} for versions without
-      optional parameters.
+  val bytes_size_of : int t -> char t -> bytes t
+  (** Builds a bytes generator from a (non-negative) size generator
+      and a character generator.
+      @since 0.90 *)
+
+  val bytes : bytes t
+  (** Builds a bytes generator. Bytes size is generated by {!nat}
+      and characters are generated by {!char}.
+
+      Note: This had an optional [?gen] parameter removed in 0.90.
+      Use {!bytes_of} instead to pass a [char] generator.
       @since 0.20 *)
 
   val bytes_of : char t -> bytes t
@@ -446,72 +466,69 @@ module Gen : sig
       @since 0.20 *)
 
   val bytes_small : bytes t
-  (** Builds a bytes generator using the {!char} character generator, length is {!small_nat}
+  (** Builds a bytes generator using the {!char} character generator, length is {!nat_small}
       @since 0.20 *)
 
   val bytes_small_of : char t -> bytes t
-  (** Builds a bytes generator using the given character generator, length is {!small_nat}.
+  (** Builds a bytes generator using the given character generator, length is {!nat_small}.
       @since 0.20 *)
 
-  val string_size : ?gen:char t -> int t -> string t
+  val string_size : int t -> string t
   (** Builds a string generator from a (non-negative) size generator.
-      Accepts an optional character generator (the default is {!char}). *)
+      Characters are generated by {!char}. *)
 
-  val string : ?gen:char t -> string t
-  (** Builds a string generator. String size is generated by {!nat}.
-      Accepts an optional character generator (the default is {!char}).
-      See also {!string_of} and {!string_readable} for versions without
-      optional parameters. *)
+  val string_size_of : int t -> char t -> string t
+  (** Builds a string generator from a (non-negative) size generator
+      and a character generator.
+      @since 0.90 *)
+
+  val string : string t
+  (** Builds a string generator. String size is generated by {!nat}
+      and characters are generated by {!char}.
+
+      Note: This had an optional [?gen] parameter removed in 0.90.
+      Use {!string_of} instead to pass a [char] generator. *)
 
   val string_of : char t -> string t
   (** Builds a string generator using the given character generator.
       @since 0.11 *)
 
-  val string_readable : string t
-  (** Builds a string generator using the {!printable} character generator.
-      @since 0.11
-      @deprecated use {!string_printable} *)
-  [@@deprecated "see string_printable"]
-
   val string_printable : string t
   (** Builds a string generator using the {!printable} character generator.
       @since 0.18 *)
 
-  val small_string : ?gen:char t -> string t
-  (** Builds a string generator, length is {!small_nat}
-      Accepts an optional character generator (the default is {!char}). *)
-
   val string_small : string t
-  (** Builds a string generator using the {!char} character generator, length is {!small_nat}
+  (** Builds a string generator using the {!char} character generator, length is {!nat_small}
       @since 0.20 *)
 
   val string_small_of : char t -> string t
-  (** Builds a string generator using the given character generator, length is {!small_nat}.
+  (** Builds a string generator using the given character generator, length is {!nat_small}.
       @since 0.20 *)
 
-  val small_list : 'a t -> 'a list t
-  (** Generates lists of small size (see {!small_nat}).
-      @since 0.5.3 *)
+  val list_small : 'a t -> 'a list t
+  (** Generates lists of small size (see {!nat_small}).
+      @since 0.90 *)
 
-  val flatten_l : 'a t list -> 'a list t
+  val flatten_list : 'a t list -> 'a list t
   (** Generate a list of elements from individual generators
-      @since 0.13 *)
+      @since 0.90 *)
 
-  val flatten_a : 'a t array -> 'a array t
+  val flatten_array : 'a t array -> 'a array t
   (** Generate an array of elements from individual generators
-      @since 0.13 *)
+      @since 0.90 *)
 
-  val flatten_opt : 'a t option -> 'a option t
+  val flatten_option : 'a t option -> 'a option t
   (** Generate an option from an optional generator
-      @since 0.13 *)
+      @since 0.90 *)
 
-  val flatten_res : ('a t, 'e) result -> ('a,'e) result t
+  val flatten_result : ('a t, 'e) result -> ('a,'e) result t
   (** Generate a result from [Ok g], an error from [Error e]
-      @since 0.13 *)
+      @since 0.90 *)
 
-  val small_array : 'a t -> 'a array t
-  (** Generates arrays of small size (see {!small_nat}).
-      @since 0.10 *)
+  val array_small : 'a t -> 'a array t
+  (** Generates arrays of small size (see {!nat_small}).
+      @since 0.90 *)
+
 
   (** {3 Tuple generators}
 
@@ -570,7 +587,7 @@ module Gen : sig
       to the size-bounded generator.
       @since 0.5 *)
 
-  val fix : (('a -> 'b t) -> ('a -> 'b t)) -> 'a -> 'b t
+  val fix : (('a -> 'b t) -> 'a -> 'b t) -> 'a -> 'b t
   (** Parametrized fixpoint combinator for generating recursive values.
 
       The fixpoint is parametrized over an arbitrary state ('a), and the
@@ -591,7 +608,7 @@ module Gen : sig
                               (fun self n -> match n with
                                  | 0 -> map leaf nat
                                  | n ->
-                                   frequency
+                                   oneof_weighted
                                      [1, map leaf nat;
                                       2, map2 node (self (n/2)) (self (n/2))]
                               ))
@@ -923,6 +940,24 @@ module Shrink : sig
   (** int64 shrinker. Shrinks towards [0L].
       @since 0.14 *)
 
+  val float : float t
+  (** float shrinker. Shrinks floating point numbers towards [1.0] or [-1.0]
+      and prefers a shorter printed rendering.
+      @since 0.27 *)
+
+  val float_bound : float -> float t
+  (** float shrinker for bounded floating point numbers.
+      [float_bound b] shrinks floating point numbers towards [0.] for both
+      positive and negative bounds [b], preferring a shorter printed rendering.
+      @since 0.27 *)
+
+  val float_range : float -> float -> float t
+  (** [float_range low high] shrinks floating point numbers in the range [low; high] (inclusive).
+      Shrinks towards [low] if [low >= 0.], towards [high] if [high <= 0.], and
+      towards [0.] if [low < 0.] and [0. <. high]. It prefers a shorter printed rendering.
+      @raise Invalid_argument if [low > high].
+      @since 0.27 *)
+
   val option : 'a t -> 'a option t
   (** option shrinker. Shrinks towards [None].
       [option shk] reduces [Some v] values using [shk] to reduce [v]. *)
@@ -1071,6 +1106,11 @@ val set_shrink : 'a Shrink.t -> 'a arbitrary -> 'a arbitrary
 val set_collect : ('a -> string) -> 'a arbitrary -> 'a arbitrary
 val set_stats : 'a stat list -> 'a arbitrary -> 'a arbitrary (** @since 0.6 *)
 
+val no_shrink : 'a arbitrary -> 'a arbitrary
+(** [no_shrink gen] returns a generator using [gen] but with shrinking
+    disabled.
+    @since 0.90 *)
+
 val add_shrink_invariant : ('a -> bool) -> 'a arbitrary -> 'a arbitrary
 (** Update shrinker by only keeping smaller values satisfying the
     given invariant.
@@ -1104,14 +1144,13 @@ val bool : bool arbitrary
 (** Uniform boolean generator. *)
 
 val float : float arbitrary
-(** Generates regular floats (no nan and no infinities). *)
-(* FIXME: does not generate nan nor infinity I think. *)
+(** Generates regular floats (no infinities). *)
 
-val pos_float : float arbitrary
-(** Positive float generator (no nan and no infinities). *)
+val float_pos : float arbitrary
+(** Positive float generator (no infinities). *)
 
-val neg_float : float arbitrary
-(** Negative float generator (no nan and no infinities). *)
+val float_neg : float arbitrary
+(** Negative float generator (no infinities). *)
 
 val float_bound_inclusive : float -> float arbitrary
 (** [float_bound_inclusive n] is uniform between [0] and [n] included. If [bound] is
@@ -1129,33 +1168,52 @@ val float_range : float -> float -> float arbitrary
     @raise Invalid_argument if [low > high] or if the range is larger than [max_float].
     @since 0.11 *)
 
-val exponential : float -> float arbitrary
-(** [exponential m] generates floating-point numbers following an exponential
+val (--.) : float -> float -> float arbitrary
+(** Synonym for [float_range]
+    @since 0.90 *)
+
+val float_exp : float -> float arbitrary
+(** [float_exp m] generates floating-point numbers following an exponential
     distribution with a mean of [m].
     @raise Invalid_argument if [m] is NaN.
+    @since 0.90 *)
+
+val exponential : float -> float arbitrary
+(** Synonym for {!float_exp}.
     @since 0.23 *)
 
 val int : int arbitrary
-(** Int generator. Uniformly distributed. *)
+(** Generates integers uniformly. *)
 
 val int_bound : int -> int arbitrary
-(** [int_bound n] is uniform between [0] and [n] included. *)
+(** [int_bound n] generates integers uniformly between [0] and [n] included. *)
 
 val int_range : int -> int -> int arbitrary
-(** [int_range a b] is uniform between [a] and [b] included. [b] must be
-    larger than [a]. *)
+(** [int_range a b] generates integers uniformly between [a] and [b] included.
+    [b] must be larger than [a]. *)
 
-val small_nat : int arbitrary
-(** Small unsigned integers.
-    @since 0.5.1 *)
+val int_small : int arbitrary
+(** Generates small signed integers.
+    @since 0.90 *)
 
-val small_int : int arbitrary
-(** Small unsigned integers. See {!Gen.small_int}.
-    @deprecated use {!small_signed_int}. *)
+val nat : int arbitrary
+(** Generates small natural numbers (< [10_000], [0] included).
+    Non-uniform: smaller numbers are more likely than bigger numbers.
+    @since 0.90 *)
 
-val small_signed_int : int arbitrary
-(** Small signed integers.
-    @since 0.5.2 *)
+val int_pos_small : int arbitrary
+(** Generates small positive integers ([0] included).
+    @since 0.90 *)
+
+val int_pos_mid : int arbitrary
+(** Generates small natural numbers (< [10_000], [0] included).
+    Synonym for {!nat}.
+    @since 0.90 *)
+
+val nat_small : int arbitrary
+(** Generates small positive integers ([0] included).
+    Synonym for {!int_pos_small}.
+    @since 0.90 *)
 
 val (--) : int -> int -> int arbitrary
 (** Synonym for {!int_range}. *)
@@ -1166,46 +1224,65 @@ val int32 : int32 arbitrary
 val int64 : int64 arbitrary
 (** Int64 generator. Uniformly distributed. *)
 
-val pos_int : int arbitrary
+val int_pos : int arbitrary
 (** Positive int generator (0 included). Uniformly distributed.
-    See {!Gen.pint} *)
+    See {!Gen.int_pos} *)
 
-val small_int_corners : unit -> int arbitrary
-(** As [small_int], but each newly created generator starts with
+val int_neg : int arbitrary
+(** Negative int generator (0 excluded). Uniformly distributed.
+    See {!Gen.int_neg}
+    @since 0.90 *)
+
+val int_small_corners : unit -> int arbitrary
+(** As [int_small], but each newly created generator starts with
     a list of corner cases before falling back on random generation.
 
-    Note that [small_int_corners ()] is stateful, meaning that once the list of
+    Note that [int_small_corners ()] is stateful, meaning that once the list of
     corner cases has been emitted, subsequent calls will not reproduce them.
     As a consequence, in the following example, the first test fails with a
     counter example, whereas the second rerun does not:
     {[
-      let gen = QCheck.small_int_corners ()
+      let gen = QCheck.int_small_corners ()
       let t = QCheck.Test.make ~name:"never max_int" gen (fun i -> i <> max_int)
       let _ = QCheck_base_runner.run_tests ~verbose:true [t;t]
     ]}
- *)
-
-val neg_int : int arbitrary
-(** Negative int generator (0 included, see {!Gen.neg_int}).
-    The distribution is similar to that of
-    [small_int], not of [pos_int].
 *)
 
 val char : char arbitrary
 (** Uniformly distributed on all the chars (not just ascii or
     valid latin-1). *)
 
-val printable_char : char arbitrary
+val char_range : char -> char -> char arbitrary
+(** Generates chars between the two bounds, inclusive.
+    Example: [char_range 'a' 'z'] for all lower case ascii letters.
+    @since 0.90 *)
+
+val char_printable : char arbitrary
 (** Uniformly distributed over a subset of printable ascii chars.
     Ascii character codes 32 to 126, inclusive - or ['\n'] with code 10.
-  *)
+    @since 0.90 *)
 
-val numeral_char : char arbitrary
-(** Uniformly distributed over ['0'..'9']. *)
+val printable : char arbitrary
+(** Synonym for {!char_printable}.
+    @since 0.90 *)
 
-val bytes_gen_of_size : int Gen.t -> char Gen.t -> bytes arbitrary
-(** Builds a bytes generator from a (non-negative) size generator and a character generator.
-    @since 0.20 *)
+val char_numeral : char arbitrary
+(** Uniformly distributed over ['0'..'9'].
+    @since 0.90 *)
+
+val numeral : char arbitrary
+(** Synonym for {!char_numeral}.
+    @since 0.90 *)
+
+val bytes_size : int Gen.t -> bytes arbitrary
+(** Builds a bytes generator from a (non-negative) size generator.
+    Characters are generated by {!Gen.char}.
+    @since 0.90 *)
+
+val bytes_size_of : int Gen.t -> char Gen.t -> bytes arbitrary
+(** Builds a bytes generator from a (non-negative) size generator
+    and a character generator.
+    @since 0.90 *)
 
 val bytes_of : char Gen.t -> bytes arbitrary
 (** Generates bytes with a distribution of length of {!Gen.nat}.
@@ -1217,27 +1294,17 @@ val bytes : bytes arbitrary
     @since 0.20 *)
 
 val bytes_small : bytes arbitrary
-(** Same as {!bytes} but with a small length (ie {!Gen.small_nat} ).
+(** Same as {!bytes} but with a small length (ie {!Gen.nat_small} ).
     @since 0.20 *)
 
 val bytes_small_of : char Gen.t -> bytes arbitrary
-(** Same as {!bytes_of} but with a small length (ie {!Gen.small_nat} ).
-    @since 0.20 *)
-
-val bytes_of_size : int Gen.t -> bytes arbitrary
-(** Generates bytes with distribution of characters of [char].
+(** Same as {!bytes_of} but with a small length (ie {!Gen.nat_small} ).
     @since 0.20 *)
 
 val bytes_printable : bytes arbitrary
 (** Generates bytes with a distribution of length of {!Gen.nat}
     and distribution of characters of [printable_char].
     @since 0.20 *)
-
-val string_gen_of_size : int Gen.t -> char Gen.t -> string arbitrary
-(** Builds a string generator from a (non-negative) size generator and a character generator. *)
-
-val string_gen : char Gen.t -> string arbitrary
-(** Generates strings with a distribution of length of {!Gen.nat}. *)
 
 val string_of : char Gen.t -> string arbitrary
 (** Synonym for {!string_gen} added for convenience.
@@ -1247,73 +1314,50 @@ val string : string arbitrary
 (** Generates strings with a distribution of length of {!Gen.nat}
     and distribution of characters of [char]. *)
 
-val small_string : string arbitrary
-(** Same as {!string} but with a small length (ie {!Gen.small_nat} ). *)
+val string_size : int Gen.t -> string arbitrary
+(** Builds a string generator from a (non-negative) size generator.
+    Characters are generated by {!Gen.char}.
+    @since 0.90 *)
+
+val string_size_of : int Gen.t -> char Gen.t -> string arbitrary
+(** Builds a string generator from a (non-negative) size generator
+    and a character generator.
+    @since 0.90 *)
 
 val string_small : string arbitrary
-(** Synonym for [small_string] added for convenience.
+(** Same as {!string} but with a small length (ie {!Gen.nat_small} ).
     @since 0.20 *)
 
 val string_small_of : char Gen.t -> string arbitrary
-(** Same as {!string_of} but with a small length (ie {!Gen.small_nat} ).
+(** Same as {!string_of} but with a small length (ie {!Gen.nat_small} ).
     @since 0.20 *)
 
-val small_list : 'a arbitrary -> 'a list arbitrary
-(** Generates lists of small size (see {!Gen.small_nat}).
-    @since 0.5.3 *)
-
-val string_of_size : int Gen.t -> string arbitrary
-(** Generates strings with distribution of characters of [char]. *)
-
-val printable_string : string arbitrary
-(** Generates strings with a distribution of length of {!Gen.nat}
-    and distribution of characters of [printable_char]. *)
+val list_small : 'a arbitrary -> 'a list arbitrary
+(** Generates lists of small size (see {!Gen.nat_small}).
+    @since 0.90 *)
 
 val string_printable : string arbitrary
-(** Synonym for [printable_string] added for convenience.
-    @since 0.20 *)
-
-val printable_string_of_size : int Gen.t -> string arbitrary
-(** Generates strings with distribution of characters of [printable_char]. *)
-
-val string_printable_of_size : int Gen.t -> string arbitrary
-(** Synonym for [printable_string_of_size] added for convenience.
-    @since 0.20 *)
-
-val small_printable_string : string arbitrary
-(** Generates strings with a length of [small_nat]
-    and distribution of characters of [printable_char]. *)
-
-val string_small_printable : string arbitrary
-(** Synonym for [small_printable_string] added for convenience.
-    @since 0.20 *)
-
-val numeral_string : string arbitrary
 (** Generates strings with a distribution of length of {!Gen.nat}
-    and distribution of characters of [numeral_char]. *)
-
-val string_numeral : string arbitrary
-(** Synonym for [numeral_string] added for convenience.
-    @since 0.20 *)
-
-val numeral_string_of_size : int Gen.t -> string arbitrary
-(** Generates strings with a distribution of characters of [numeral_char]. *)
-
-val string_numeral_of_size : int Gen.t -> string arbitrary
-(** Synonym for [numeral_string_of_size] added for convenience.
+    and distribution of characters of [char_printable].
     @since 0.20 *)
 
 val list : 'a arbitrary -> 'a list arbitrary
 (** Generates lists with length generated by {!Gen.nat}. *)
 
-val list_of_size : int Gen.t -> 'a arbitrary -> 'a list arbitrary
-(** Generates lists with length from the given distribution. *)
+val list_size : int Gen.t -> 'a arbitrary -> 'a list arbitrary
+(** Generates lists with length from the given distribution.
+    @since 0.90 *)
 
 val array : 'a arbitrary -> 'a array arbitrary
 (** Generates arrays with length generated by {!Gen.nat}. *)
 
-val array_of_size : int Gen.t -> 'a arbitrary -> 'a array arbitrary
-(** Generates arrays with length from the given distribution. *)
+val array_small : 'a arbitrary -> 'a array arbitrary
+(** Generates arrays of small size (see {!Gen.array_small}).
+    @since 0.90 *)
+
+val array_size : int Gen.t -> 'a arbitrary -> 'a array arbitrary
+(** Generates arrays with length from the given distribution.
+    @since 0.90 *)
 
 val option : ?ratio:float -> 'a arbitrary -> 'a option arbitrary
 (** Choose between returning Some random value with optional ratio, or None. *)
@@ -1437,41 +1481,44 @@ val tup9 :
 
 (** {2 Combinatoric arbitrary combinators } *)
 
-val choose : 'a arbitrary list -> 'a arbitrary
-(** Choose among the given list of generators. The list must not
-    be empty; if it is [Invalid_argument] is raised. *)
+val oneof_list : ?print:'a Print.t -> ?small:('a -> int) -> 'a list -> 'a arbitrary
+(** Pick an element randomly in the list.
+    @since 0.90 *)
 
-val oneofl : ?print:'a Print.t -> ?collect:('a -> string) ->
-  'a list -> 'a arbitrary
-(** Pick an element randomly in the list. *)
+val oneof_array : ?print:'a Print.t -> ?small:('a -> int) -> 'a array -> 'a arbitrary
+(** Pick an element randomly in the array.
+    @since 0.90 *)
 
-val oneofa : ?print:'a Print.t -> ?collect:('a -> string) ->
-  'a array -> 'a arbitrary
-(** Pick an element randomly in the array. *)
-
-val oneof : 'a arbitrary list -> 'a arbitrary
+val oneof : ?print:'a Print.t -> ?small:('a -> int) ->
+  ?shrink:'a Shrink.t -> 'a arbitrary list -> 'a arbitrary
 (** Pick a generator among the list, randomly.
-    @deprecated this function is badly specified and will not use shrinkers
-    appropriately. Consider using {!Gen.oneof} and then {!make} to build
-    a well behaved arbitrary instance.
-*)
+    The resulting generator uses any optional [print], [small], and [shrink]
+    parameter passed, and otherwise those from the first element in the argument
+    list, if available.
+
+    Consider using {!Gen.oneof} and then {!make} to build
+    an arbitrary instance with a different behaviour.
+
+    @raise Invalid_argument if the argument list is empty. *)
 
 val always : ?print:'a Print.t -> 'a -> 'a arbitrary
 (** Always return the same element. *)
 
-val frequency : ?print:'a Print.t -> ?small:('a -> int) ->
-  ?shrink:'a Shrink.t -> ?collect:('a -> string) ->
-  (int * 'a arbitrary) list -> 'a arbitrary
-(** Similar to {!oneof} but with frequencies. *)
+val oneof_weighted : ?print:'a Print.t -> ?small:('a -> int) ->
+  ?shrink:'a Shrink.t -> (int * 'a arbitrary) list -> 'a arbitrary
+(** Similar to {!oneof} but with frequencies.
+    @since 0.90 *)
 
-val frequencyl : ?print:'a Print.t -> ?small:('a -> int) ->
+val oneof_list_weighted : ?print:'a Print.t -> ?small:('a -> int) ->
   (int * 'a) list -> 'a arbitrary
-(** Same as {!oneofl}, but each element is paired with its frequency in
-    the probability distribution (the higher, the more likely). *)
+(** Same as {!oneof_list}, but each element is paired with its frequency in
+    the probability distribution (the higher, the more likely).
+    @since 0.90 *)
 
-val frequencya : ?print:'a Print.t -> ?small:('a -> int) ->
+val oneof_array_weighted : ?print:'a Print.t -> ?small:('a -> int) ->
   (int * 'a) array -> 'a arbitrary
-(** Same as {!frequencyl}, but with an array. *)
+(** Same as {!oneof_list_weighted}, but with an array.
+    @since 0.90 *)
 
 val map : ?rev:('b -> 'a) -> ('a -> 'b) -> 'a arbitrary -> 'b arbitrary
 (** [map f a] returns a new arbitrary instance that generates values using
@@ -1644,20 +1691,23 @@ module Test : sig
   *)
 
   val get_law : 'a cell -> ('a -> bool)
-  (** @deprecated use {!QCheck2.Test.get_law} instead *)
+  (** Get the tested property of a cell.
+      Synonym for {!QCheck2.Test.get_law} *)
   val get_name : _ cell -> string
-  (** @deprecated use {!QCheck2.Test.get_name} instead *)
+  (** Get the name of a cell.
+      Synonym for {!QCheck2.Test.get_name} *)
   val set_name : _ cell -> string -> unit
-  (** @deprecated use {!QCheck2.Test.set_name} instead *)
+  (** Set the name of a cell.
+      Synonym for {!QCheck2.Test.set_name} *)
 
   val get_count : _ cell -> int
   (** Get the count of a cell.
-      @deprecated use {!QCheck2.Test.get_count} instead
+      Synonym for {!QCheck2.Test.get_count}
       @since 0.5.3 *)
 
   val get_long_factor : _ cell -> int
   (** Get the long factor of a cell.
-      @deprecated use {!QCheck2.Test.get_long_factor} instead
+      Synonym for {!QCheck2.Test.get_long_factor}
       @since 0.5.3 *)
 
   val make :
@@ -1809,28 +1859,7 @@ module Observable : sig
   val quad : 'a t -> 'b t -> 'c t -> 'd t -> ('a * 'b * 'c * 'd) t
 end
 
-(** {2 Deprecated function generator combinators } *)
-
-val fun1_unsafe : 'a arbitrary -> 'b arbitrary -> ('a -> 'b) arbitrary
-(** Generator of functions of arity 1.
-    The functions are always pure and total functions:
-    - when given the same argument (as decided by Stdlib.(=)), it returns the same value
-    - it never does side effects, like printing or never raise exceptions etc.
-      The functions generated are really printable.
-
-    renamed from {!fun1} since 0.6
-
-    @deprecated use {!fun_} instead.
-
-    @since 0.6
-*)
-
-val fun2_unsafe : 'a arbitrary -> 'b arbitrary -> 'c arbitrary -> ('a -> 'b -> 'c) arbitrary
-(** Generator of functions of arity 2. The remark about [fun1] also apply
-    here.
-    renamed from {!fun2} since 0.6
-    @deprecated use {!fun_} instead since 0.6
-*)
+(** {2 Internal function generator representation } *)
 
 type _ fun_repr
 (** Internal data for functions. A ['f fun_] is a function
@@ -1845,7 +1874,7 @@ type _ fun_repr
     For example:
     {[
       QCheck.Test.make
-        QCheck.(pair (fun1 Observable.int bool) (small_list int))
+        QCheck.(pair (fun1 Observable.int bool) (list_small int))
         (fun (Fun (_,f), l) -> l=(List.rev_map f l |> List.rev l))
     ]}
 *)

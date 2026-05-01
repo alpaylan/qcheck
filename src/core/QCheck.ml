@@ -122,10 +122,11 @@ module Gen = struct
   let return x _st = x
   let pure = return
 
-  let (>>=) gen f st =
-    f (gen st) st
+  let bind gen f st = f (gen st) st
+  let (>>=) = bind
 
-  let (<*>) f x st = f st (x st)
+  let ap f x st = f st (x st)
+  let (<*>) = ap
   let map f x st = f (x st)
   let map2 f x y st = f (x st) (y st)
   let map3 f x y z st = f (x st) (y st) (z st)
@@ -136,25 +137,26 @@ module Gen = struct
   let (<$>) f x st = f (x st)
 
   let oneof l st = List.nth l (Random.State.int st (List.length l)) st
-  let oneofl xs st = List.nth xs (Random.State.int st (List.length xs))
-  let oneofa xs st = Array.get xs (Random.State.int st (Array.length xs))
+  let oneof_list xs st = List.nth xs (Random.State.int st (List.length xs))
+  let oneof_array xs st = Array.get xs (Random.State.int st (Array.length xs))
 
-  let frequencyl l st =
+  let oneof_list_weighted l st =
     let sums = sum_int (List.map fst l) in
     let i = Random.State.int st sums in
     let rec aux acc = function
       | ((x,g)::xs) -> if i < acc+x then g else aux (acc+x) xs
-      | _ -> failwith "frequency"
+      | _ -> failwith "Gen.oneof_list_weighted"
     in
     aux 0 l
 
-  let frequencya a = frequencyl (Array.to_list a)
+  let oneof_array_weighted a = oneof_list_weighted (Array.to_list a)
 
-  let frequency l st = frequencyl l st st
+  let oneof_weighted l st = oneof_list_weighted l st st
 
-  let small_nat st =
+  let int_pos_small st =
     let p = RS.float st 1. in
     if p < 0.75 then RS.int st 10 else RS.int st 100
+  let nat_small = int_pos_small
 
   (* natural number generator *)
   let nat st =
@@ -164,10 +166,7 @@ module Gen = struct
     else if p < 0.95 then RS.int st 1_000
     else RS.int st 10_000
 
-  let big_nat st =
-    let p = RS.float st 1. in
-    if p < 0.75 then nat st
-    else RS.int st 1_000_000
+  let int_pos_mid = nat
 
   let unit _st = ()
 
@@ -184,8 +183,8 @@ module Gen = struct
     let right = Int64.of_int (RS.bits st) in
     Int64.(float_of_bits (logor left (logor middle right)))
 
-  let pfloat st = abs_float (float st)
-  let nfloat st = -.(pfloat st)
+  let float_pos st = abs_float (float st)
+  let float_neg st = -.(float_pos st)
 
   let float_bound_inclusive bound st = RS.float st bound
 
@@ -201,20 +200,18 @@ module Gen = struct
 
   let (--.) = float_range
 
-  let exponential mean =
-    if Float.is_nan mean then invalid_arg "Gen.exponential";
+  let float_exp mean =
+    if Float.is_nan mean then invalid_arg "Gen.float_exp";
     let unit_gen = float_bound_inclusive 1.0 in
     map (fun p -> -. mean *. (log p)) unit_gen
     (* See https://en.wikipedia.org/wiki/Relationships_among_probability_distributions *)
 
-  let neg_int st = -(nat st)
+  let exponential = float_exp
 
   let option ?(ratio = 0.85) f st =
     let p = RS.float st 1. in
     if p < (1.0 -. ratio) then None
     else Some (f st)
-
-  let opt = option
 
   let result ?(ratio = 0.75) vg eg st =
     let p = RS.float st 1. in
@@ -223,7 +220,7 @@ module Gen = struct
     else Ok (vg st)
 
   (* Uniform random int generator *)
-  let pint =
+  let int_pos =
     if Sys.word_size = 32 then
       fun st -> RS.bits st
     else (* word size = 64 *)
@@ -238,12 +235,14 @@ module Gen = struct
       let right = RS.bits st in
       left lor middle lor right
 
-  let int st = if RS.bool st then - (pint st) - 1 else pint st
+  let int_neg st = -(int_pos st)-1
+
+  let int st = if RS.bool st then - (int_pos st) - 1 else int_pos st
   let int_bound n =
     if n < 0 then invalid_arg "Gen.int_bound";
     if n <= (1 lsl 30) - 2
     then fun st -> Random.State.int st (n + 1)
-    else fun st -> let r = pint st in r mod (n + 1)
+    else fun st -> let r = int_pos st in r mod (n + 1)
   let int_range a b =
     if b < a then invalid_arg "Gen.int_range";
     if a >= 0 || b < 0 then (
@@ -262,14 +261,10 @@ module Gen = struct
 
   let (--) = int_range
 
-  (* NOTE: we keep this alias to not break code that uses [small_int]
-     for sizes of strings, arrays, etc. *)
-  let small_int = small_nat
-
-  let small_signed_int st =
+  let int_small st =
     if bool st
-    then small_nat st
-    else - (small_nat st)
+    then nat_small st
+    else - (nat_small st)
 
   let char_range a b = map Char.chr (Char.code a -- Char.code b)
 
@@ -286,9 +281,6 @@ module Gen = struct
   let int32 st = Int32.of_string (random_binary_string st 32)
   let int64 st = Int64.of_string (random_binary_string st 64)
 
-  let ui32 = int32
-  let ui64 = int64
-
   let list_size size gen st =
     foldn ~f:(fun acc _ -> (gen st)::acc) ~init:[] (size st)
   let list gen st = list_size nat gen st
@@ -297,18 +289,19 @@ module Gen = struct
   let array_size size gen st =
     Array.init (size st) (fun _ -> gen st)
   let array gen st = array_size nat gen st
-  let array_repeat n g = array_size (return n) g
 
-  let flatten_l l st = List.map (fun f->f st) l
-  let flatten_a a st = Array.map (fun f->f st) a
-  let flatten_opt o st =
+  let flatten_list l st = List.map (fun f->f st) l
+  let flatten_array a st = Array.map (fun f->f st) a
+  let flatten_option o st =
     match o with
     | None -> None
     | Some f -> Some (f st)
-  let flatten_res r st =
+  let flatten_opt = flatten_option
+  let flatten_result r st =
     match r with
     | Ok f -> Ok (f st)
     | Error e -> Error e
+  let flatten_res = flatten_result
 
   let shuffle_a a st =
     for i = Array.length a-1 downto 1 do
@@ -318,12 +311,17 @@ module Gen = struct
       a.(j) <- tmp;
     done
 
-  let shuffle_l l st =
+  let shuffle_array a st =
+    let a' = Array.copy a in
+    shuffle_a a' st;
+    a'
+
+  let shuffle_list l st =
     let a = Array.of_list l in
     shuffle_a a st;
     Array.to_list a
 
-  let shuffle_w_l l st =
+  let shuffle_list_weighted l st =
     let sample (w, v) =
       let fl_w = float_of_int w in
       (float_bound_inclusive 1. st ** (1. /. fl_w), v)
@@ -397,34 +395,36 @@ module Gen = struct
     Bytes.set s (l-1) '\n';
     Bytes.unsafe_to_string s
 
-  let printable st = printable_chars.[RS.int st (String.length printable_chars)]
-  let numeral st = char_of_int (48 + RS.int st 10)
+  let char_printable st = printable_chars.[RS.int st (String.length printable_chars)]
+  let printable = char_printable
+  let char_numeral st = char_of_int (48 + RS.int st 10)
+  let numeral = char_numeral
 
-  let bytes_size ?(gen = char) size st =
+  let bytes_size_of size gen st =
     let s = Bytes.create (size st) in
     for i = 0 to Bytes.length s - 1 do
       Bytes.set s i (gen st)
     done;
     s
+  let bytes_size size = bytes_size_of size char
 
-  let string_size ?(gen = char) size st =
-    let s = bytes_size ~gen size st in
+  let string_size_of size gen st =
+    let s = bytes_size_of size gen st in
     Bytes.unsafe_to_string s
+  let string_size size = string_size_of size char
 
-  let bytes ?gen st = bytes_size ?gen nat st
-  let string ?gen st = string_size ?gen nat st
-  let bytes_of gen = bytes_size ~gen nat
-  let string_of gen = string_size ~gen nat
-  let bytes_printable = bytes_size ~gen:printable nat
-  let string_printable = string_size ~gen:printable nat
-  let string_readable = string_printable
-  let bytes_small st = bytes_size small_nat st
-  let bytes_small_of gen st = bytes_size ~gen small_nat st
-  let small_string ?gen st = string_size ?gen small_nat st
-  let small_list gen = list_size small_nat gen
-  let small_array gen = array_size small_nat gen
-  let string_small st = string_size small_nat st
-  let string_small_of gen st = string_size ~gen small_nat st
+  let bytes = bytes_size nat
+  let string = string_size nat
+  let bytes_of gen = bytes_size_of nat gen
+  let string_of gen = string_size_of nat gen
+  let bytes_printable = bytes_size_of nat char_printable
+  let string_printable = string_size_of nat char_printable
+  let bytes_small = bytes_size nat_small
+  let bytes_small_of gen = bytes_size_of nat_small gen
+  let list_small gen = list_size nat_small gen
+  let array_small gen = array_size nat_small gen
+  let string_small = string_size nat_small
+  let string_small_of gen = string_size_of nat_small gen
 
   let join g st = (g st) st
 
@@ -436,9 +436,9 @@ module Gen = struct
       | e::l -> cors := l; e
 
   let int_pos_corners = [0;1;2;max_int]
-  let int_corners = int_pos_corners @ [min_int]
+  let int_corners = int_pos_corners @ [min_int;-2;-1]
 
-  let nng_corners () = graft_corners nat int_pos_corners ()
+  let int_small_corners () = graft_corners int_small int_corners ()
 
   (* sized, fix *)
 
@@ -510,8 +510,10 @@ module Print = struct
   let int32 i = Int32.to_string i ^ "l"
   let int64 i = Int64.to_string i ^ "L"
   let bool = string_of_bool
-  let float f = (* Windows workaround to avoid leading exponent zero such as "-1.00001604579e-010" *)
-    if Sys.win32
+  let float f = (* Workaround for Windows and macOS to print negative nans consistently as "-nan" *)
+    if Float.is_nan f && Float.sign_bit f
+    then "-nan"
+    else if Sys.win32 (* Windows workaround to avoid leading exponent zero such as "-1.00001604579e-010" *)
     then string_of_float f |> cut_exp_zero
     else string_of_float f
   let string s = Printf.sprintf "%S" s
@@ -753,6 +755,93 @@ module Shrink = struct
     while !y < -2 || !y >2 do y := !y / 2; yield (x - !y); done; (* fast path *)
     if x>0 then for i=x-1 downto 0 do yield i done;
     if x<0 then for i=x+1 to 0 do yield i done
+
+  let float_suff_different cand x =
+    let threshold = 1e-4 in (* candidate has to be at least 0.0001% different *)
+    Float.(abs cand < abs x) && Float.abs ((cand -. x) /. x) > threshold
+
+  (* [float_shrink_exponent 2.234 213] shrinks an exponent 213 from 2.234e213
+     and glues it back together with significand 2.234 *)
+  let float_shrink_exponent signif exponent yield =
+    int (int_of_string exponent)
+      (fun exponent -> Printf.sprintf "%se%i" signif exponent |> float_of_string |> yield)
+
+  (* [float_shrink_significand 2.234e213 "2.234" "213"] shrinks the significand 2.234 of
+     a floating point number in scientific notation 2.234e213 *)
+  let float_shrink_significand orig_x signif exponent yield =
+    let signif = float_of_string signif in
+    let exponent = float_of_string ("1e" ^ exponent) in
+    let recompose_float signif = signif *. exponent in
+    let recompose_and_yield signif =
+      let cand = recompose_float signif in
+      if String.length (Print.float cand) <= String.length (Print.float orig_x)
+      then yield cand in
+    (* [shrink_decimals 2.2345 1000] multiplies a significand 2.2345 with a
+       precision 1000 to get [2234], shrink it, and thus round off decimals *)
+    let shrink_decimals signif prec yield =
+      let tmp = signif *. float prec in (* use tmp to avoid i386 ocamlopt 4 weirdness https://github.com/ocaml/ocaml/issues/8018 *)
+      let multiple = int_of_float tmp in (* returns an unshrinkable 0 on overflow *)
+      if prec = 10 || multiple mod 100 <> 0 then (* first iteration or decimals to round *)
+        int multiple (fun i ->
+            let signif' = float i /. float prec in
+            if float_suff_different signif' signif
+            then yield signif') in
+    (* first try reducing the decimal digits with different precision *)
+    if signif > 1.0 || signif < -1.0 (* don't attempt to shrink 1.0 or -1.0 *)
+    then
+      begin
+        shrink_decimals signif 10     recompose_and_yield;
+        shrink_decimals signif 1000   recompose_and_yield;
+        shrink_decimals signif 100000 recompose_and_yield
+      end;
+    (* second try simple reductions of the significand's leading digit, in [1;9] *)
+    if signif > 2. then
+      (* shrink  2.234e213 to  1.234e213 by int shrinking the leading 2 *)
+      int (int_of_float signif)
+        (fun s -> if s != 0 then yield (recompose_float (signif -. floor signif +. float s)));
+    if signif < -2. then
+      (* shrink -2.234e213 to -1.234e213 by int shrinking the leading -2 *)
+      int (int_of_float signif)
+        (fun s -> if s != 0 then yield (recompose_float (signif -. ceil signif +. float s)))
+
+  let float x yield =
+    if not (Float.is_infinite x || Float.is_nan x) then
+    (* first try quick roundings and negation *)
+    (if x > 1. then let floor_x = floor x in
+       if float_suff_different floor_x x then yield floor_x);
+    (if x < -1. then let ceil_x = ceil x in
+       if float_suff_different ceil_x x then yield ceil_x);
+    if x < 0. then yield (-. x);
+    (* second proceed with simplification based on decimal, scientific notation 2.234e213 *)
+    match String.split_on_char 'e' (Printf.sprintf "%e" x) with
+    | [signif;exponent] ->
+      float_shrink_exponent signif exponent yield;
+      float_shrink_significand x signif exponent yield
+    | _ -> ()
+
+  let float_bound bound =
+    if bound > 0.
+    then
+      fun i ->
+        Iter.map (fun i -> i -. 1.) (float (i +. 1.)) (* towards 1. and subtract 1. afterwards *)
+        |> Iter.filter (fun i -> 0. <= i && i < bound)
+    else
+      fun i ->
+        Iter.map (fun i -> i +. 1.) (float (i -. 1.)) (* towards -1. and add 1. afterwards *)
+        |> Iter.filter (fun i -> bound < i && i <= 0.)
+
+  let float_range low high =
+    if high < low then invalid_arg "Shrink.float_range: invalid range";
+    let filter_range = Iter.filter (fun i -> low <= i && i <= high) in
+    if low >= 0. then
+      fun i -> (* move [low;high] to [1;high-low+1], shrink towards 1., and move back *)
+        Iter.map (fun i -> i +. low -. 1.) (float (i -. low +. 1.)) |> filter_range
+    else if high <= 0. then
+      fun i -> (* move [low;high] to [low-high-1;-1], shrink towards -1., and move back *)
+        Iter.map (fun i -> i +. high +. 1.) (float (i -. high -. 1.)) |> filter_range
+    else (* low < 0 && 0 < high, i.e., crosses 0. *)
+      fun i -> (* shrink towards 1. and subtract 1. afterwards *)
+        Iter.map (fun i -> i -. 1.) (float (i +. 1.)) |> filter_range
 
   let filter f shrink x = Iter.filter f (shrink x)
 
@@ -1123,6 +1212,8 @@ let set_stats s o = {o with stats=s}
 let add_stat s o = {o with stats=s :: o.stats}
 let set_gen g o = {o with gen=g}
 
+let no_shrink o = {o with shrink=None}
+
 let add_shrink_invariant f o = match o.shrink with
   | None -> o
   | Some shr -> {o with shrink=Some (Shrink.filter f shr)}
@@ -1133,51 +1224,61 @@ let get_print o = o.print
 
 let small1 _ = 1
 
-let make_scalar ?print ?collect gen =
-  make ~shrink:Shrink.nil ~small:small1 ?print ?collect gen
+let make_scalar ?collect gen =
+  make ~shrink:Shrink.float ~small:small1 ~print:Print.float ?collect gen
 let make_int ?collect gen =
   make ~shrink:Shrink.int ~small:small1 ~print:Print.int ?collect gen
 
 let adapt_ o gen =
   make ?print:o.print ?small:o.small ?shrink:o.shrink ?collect:o.collect gen
 
-let choose l = match l with
-  | [] -> raise (Invalid_argument "quickcheck.choose")
+let oneof ?print ?small ?shrink l = match l with
+  | [] -> raise (Invalid_argument "QCheck.oneof")
   | l ->
-      let a = Array.of_list l in
-      adapt_ a.(0)
-        (fun st ->
-          let arb = a.(RS.int st (Array.length a)) in
-          arb.gen st)
+    let first = List.hd l in
+    let print = _opt_sum print first.print in
+    let small = _opt_sum small first.small in
+    let shrink = _opt_sum shrink first.shrink in
+    let gens = List.map (fun x -> x.gen) l in
+    make ?print ?small ?shrink (Gen.oneof gens)
 
 let unit : unit arbitrary =
   make ~small:small1 ~shrink:Shrink.nil ~print:Print.unit Gen.unit
 let bool =
   make ~small:small1 ~shrink:Shrink.bool ~print:Print.bool Gen.bool
-let float = make_scalar ~print:Print.float Gen.float
-let pos_float = make_scalar ~print:Print.float Gen.pfloat
-let neg_float = make_scalar ~print:Print.float Gen.nfloat
+
+let float = make_scalar Gen.float
+let float_pos = make_scalar Gen.float_pos
+let float_neg = make_scalar Gen.float_neg
 
 let float_bound_inclusive bound =
-  make_scalar ~print:Print.float (Gen.float_bound_inclusive bound)
+  make ~small:small1 ~shrink:(Shrink.float_bound bound) ~print:Print.float (Gen.float_bound_inclusive bound)
 
 let float_bound_exclusive bound =
-  make_scalar ~print:Print.float (Gen.float_bound_exclusive bound)
+  make ~small:small1 ~shrink:(Shrink.float_bound bound) ~print:Print.float (Gen.float_bound_exclusive bound)
 
-let float_range low high = make_scalar ~print:Print.float (Gen.float_range low high)
+let float_range low high =
+  make ~small:small1 ~shrink:(Shrink.float_range low high) ~print:Print.float (Gen.float_range low high)
 
-let exponential mean = make_scalar ~print:Print.float (Gen.exponential mean)
+let (--.) = float_range
+
+let float_exp mean = make_scalar (Gen.float_exp mean)
+let exponential = float_exp
+
 
 let int = make_int Gen.int
 let int_bound n = make_int (Gen.int_bound n)
 let int_range a b = make_int (Gen.int_range a b)
 let (--) = int_range
-let pos_int = make_int Gen.pint
-let small_int = make_int Gen.small_int
-let small_nat = make_int Gen.small_nat
-let small_signed_int = make_int Gen.small_signed_int
-let small_int_corners () = make_int (Gen.nng_corners ())
-let neg_int = make_int Gen.neg_int
+let int_pos = make_int Gen.int_pos
+
+let nat = make_int Gen.nat
+let int_pos_small = make_int Gen.int_pos_small
+let int_pos_mid = nat
+let nat_small = int_pos_small
+let int_small = make_int Gen.int_small
+let int_small_corners () = make_int (Gen.int_small_corners ())
+let int_neg = make_int Gen.int_neg
 
 let int32 =
   make ~print:Print.int32 ~small:small1 ~shrink:Shrink.int32 Gen.int32
@@ -1188,65 +1289,45 @@ let small_char target c = abs ((Char.code c) - (Char.code target))
 
 let char =
   make ~print:Print.char ~small:(small_char 'a') ~shrink:Shrink.char Gen.char
-let printable_char =
-  make ~print:Print.char ~small:(small_char 'a') ~shrink:Shrink.char_printable Gen.printable
-let numeral_char =
-  make ~print:Print.char ~small:(small_char '0') ~shrink:Shrink.char_numeral Gen.numeral
+let char_range low high =
+  make ~print:Print.char ~small:(small_char 'a') ~shrink:(Shrink.char_generic low) (Gen.char_range low high)
+let char_printable =
+  make ~print:Print.char ~small:(small_char 'a') ~shrink:Shrink.char_printable Gen.char_printable
+let printable = char_printable
+let char_numeral =
+  make ~print:Print.char ~small:(small_char '0') ~shrink:Shrink.char_numeral Gen.char_numeral
+let numeral = char_numeral
 
-let bytes_gen_of_size size gen =
+let bytes_size_of size gen =
   make ~shrink:Shrink.bytes ~small:Bytes.length
-    ~print:Print.bytes (Gen.bytes_size ~gen size)
+    ~print:Print.bytes (Gen.bytes_size_of size gen)
+let bytes_size size = bytes_size_of size Gen.char
 let bytes_of gen =
   make ~shrink:Shrink.bytes ~small:Bytes.length
-    ~print:Print.bytes (Gen.bytes ~gen)
+    ~print:Print.bytes (Gen.bytes_of gen)
 
 let bytes = bytes_of Gen.char
-let bytes_of_size size = bytes_gen_of_size size Gen.char
-let bytes_small = bytes_gen_of_size Gen.small_nat Gen.char
-let bytes_small_of gen = bytes_gen_of_size Gen.small_nat gen
+let bytes_small = bytes_size_of Gen.nat_small Gen.char
+let bytes_small_of gen = bytes_size_of Gen.nat_small gen
 let bytes_printable =
   make ~shrink:(Shrink.bytes ~shrink:Shrink.char_printable) ~small:Bytes.length
-    ~print:Print.bytes (Gen.bytes ~gen:Gen.printable)
+    ~print:Print.bytes (Gen.bytes_of Gen.char_printable)
 
-let string_gen_of_size size gen =
+let string_size_of size gen =
   make ~shrink:Shrink.string ~small:String.length
-    ~print:Print.string (Gen.string_size ~gen size)
+    ~print:Print.string (Gen.string_size_of size gen)
 let string_of gen =
   make ~shrink:Shrink.string ~small:String.length
-    ~print:Print.string (Gen.string ~gen)
+    ~print:Print.string (Gen.string_of gen)
 
 let string = string_of Gen.char
-let string_of_size size = string_gen_of_size size Gen.char
-let string_small = string_gen_of_size Gen.small_nat Gen.char
-let string_small_of gen = string_gen_of_size Gen.small_nat gen
-let small_string = string_small
-let string_gen = string_of
+let string_size size = string_size_of size Gen.char
+let string_small = string_size_of Gen.nat_small Gen.char
+let string_small_of gen = string_size_of Gen.nat_small gen
 
-let printable_string =
+let string_printable =
   make ~shrink:(Shrink.string ~shrink:Shrink.char_printable) ~small:String.length
-    ~print:Print.string (Gen.string ~gen:Gen.printable)
-
-let printable_string_of_size size =
-  make ~shrink:(Shrink.string ~shrink:Shrink.char_printable) ~small:String.length
-    ~print:Print.string (Gen.string_size ~gen:Gen.printable size)
-
-let small_printable_string =
-  make ~shrink:(Shrink.string ~shrink:Shrink.char_printable) ~small:String.length
-    ~print:Print.string (Gen.string_size ~gen:Gen.printable Gen.small_nat)
-
-let numeral_string =
-  make ~shrink:(Shrink.string ~shrink:Shrink.char_numeral) ~small:String.length
-    ~print:Print.string (Gen.string ~gen:Gen.numeral)
-
-let numeral_string_of_size size =
-  make ~shrink:(Shrink.string ~shrink:Shrink.char_numeral) ~small:String.length
-    ~print:Print.string (Gen.string_size ~gen:Gen.numeral size)
-
-let string_printable = printable_string
-let string_printable_of_size = printable_string_of_size
-let string_small_printable = small_printable_string
-let string_numeral = numeral_string
-let string_numeral_of_size = numeral_string_of_size
+    ~print:Print.string (Gen.string_of Gen.char_printable)
 
 let list_sum_ f l = List.fold_left (fun acc x-> f x+acc) 0 l
 
@@ -1257,21 +1338,29 @@ let mk_list a gen =
   make ~small ~shrink:(Shrink.list ?shrink:a.shrink) ?print gen
 
 let list a = mk_list a (Gen.list a.gen)
-let list_of_size size a = mk_list a (Gen.list_size size a.gen)
-let small_list a = mk_list a (Gen.small_list a.gen)
+let list_size size a = mk_list a (Gen.list_size size a.gen)
+let list_small a = mk_list a (Gen.list_small a.gen)
 
 let array_sum_ f a = Array.fold_left (fun acc x -> f x+acc) 0 a
 
 let array a =
-  let small = _opt_map_or ~d:Array.length ~f:array_sum_ a.small in
+  let small x = _opt_map_or ~d:Array.length ~f:array_sum_ a.small x in
   make
     ~small
     ~shrink:(Shrink.array ?shrink:a.shrink)
     ?print:(_opt_map ~f:Print.array a.print)
     (Gen.array a.gen)
 
-let array_of_size size a =
-  let small = _opt_map_or ~d:Array.length ~f:array_sum_ a.small in
+let array_small a =
+  let small x = _opt_map_or ~d:Array.length ~f:array_sum_ a.small x in
+  make
+    ~small
+    ~shrink:(Shrink.array ?shrink:a.shrink)
+    ?print:(_opt_map ~f:Print.array a.print)
+    (Gen.array_small a.gen)
+
+let array_size size a =
+  let small x = _opt_map_or ~d:Array.length ~f:array_sum_ a.small x in
   make
     ~small
     ~shrink:(Shrink.array ?shrink:a.shrink)
@@ -1377,7 +1466,7 @@ let tup9 a b c d e f g h i =
     (Gen.tup9 a.gen b.gen c.gen d.gen e.gen f.gen g.gen h.gen i.gen)
 
 let option ?ratio a =
-  let g = Gen.opt ?ratio a.gen
+  let g = Gen.option ?ratio a.gen
   and shrink = _opt_map a.shrink ~f:Shrink.option
   and small =
     _opt_map_or a.small ~d:(function None -> 0 | Some _ -> 1)
@@ -1411,33 +1500,6 @@ let map ?rev f a =
     ?shrink:(_opt_map_2 rev a.shrink ~f:(fun r g x -> Iter.(g (r x) >|= f)))
     ?collect:(_opt_map_2 rev a.collect ~f:(fun r f x -> f (r x)))
     (fun st -> f (a.gen st))
-
-
-let fun1_unsafe : 'a arbitrary -> 'b arbitrary -> ('a -> 'b) arbitrary =
-  fun a1 a2 ->
-    let magic_object = Obj.magic (object end) in
-    let gen : ('a -> 'b) Gen.t = fun st ->
-      let h = Hashtbl.create 10 in
-      fun x ->
-        if x == magic_object then
-          Obj.magic h
-        else
-          try Hashtbl.find h x
-          with Not_found ->
-            let b = a2.gen st in
-            Hashtbl.add h x b;
-            b in
-    let pp : (('a -> 'b) -> string) option = _opt_map_2 a1.print a2.print ~f:(fun p1 p2 f ->
-      let h : ('a, 'b) Hashtbl.t = Obj.magic (f magic_object) in
-      let b = Buffer.create 20 in
-      Hashtbl.iter (fun key value -> Printf.bprintf b "%s -> %s; " (p1 key) (p2 value)) h;
-      "{" ^ Buffer.contents b ^ "}"
-    ) in
-    make
-      ?print:pp
-      gen
-
-let fun2_unsafe gp1 gp2 gp3 = fun1_unsafe gp1 (fun1_unsafe gp2 gp3)
 
 module Poly_tbl : sig
   type ('a, 'b) t
@@ -1718,19 +1780,8 @@ let fun4 o1 o2 o3 o4 ret =
 (* Generator combinators *)
 
 (** given a list, returns generator that picks at random from list *)
-let oneofl ?print ?collect xs = make ?print ?collect (Gen.oneofl xs)
-let oneofa ?print ?collect xs = make ?print ?collect (Gen.oneofa xs)
-
-(** Given a list of generators, returns generator that randomly uses one of the generators
-    from the list *)
-let oneof l =
-  let gens = List.map (fun a->a.gen) l in
-  let first = List.hd l in
-  let print = first.print
-  and small = first.small
-  and collect = first.collect
-  and shrink = first.shrink in
-  make ?print ?small ?collect ?shrink (Gen.oneof gens)
+let oneof_list ?print ?small xs = make ?print ?small (Gen.oneof_list xs)
+let oneof_array ?print ?small xs = make ?print ?small (Gen.oneof_array xs)
 
 (** Generator that always returns given value *)
 let always ?print x =
@@ -1738,19 +1789,20 @@ let always ?print x =
   make ?print gen
 
 (** like oneof, but with weights *)
-let frequency ?print ?small ?shrink ?collect l =
+let oneof_weighted ?print ?small ?shrink l =
   let first = snd (List.hd l) in
   let small = _opt_sum small first.small in
   let print = _opt_sum print first.print in
   let shrink = _opt_sum shrink first.shrink in
-  let collect = _opt_sum collect first.collect in
   let gens = List.map (fun (x,y) -> x, y.gen) l in
-  make ?print ?small ?shrink ?collect (Gen.frequency gens)
+  make ?print ?small ?shrink (Gen.oneof_weighted gens)
 
 (** Given list of [(frequency,value)] pairs, returns value with probability proportional
     to given frequency *)
-let frequencyl ?print ?small l = make ?print ?small (Gen.frequencyl l)
-let frequencya ?print ?small l = make ?print ?small (Gen.frequencya l)
+let oneof_list_weighted ?print ?small l = make ?print ?small (Gen.oneof_list_weighted l)
+let frequencyl = oneof_list_weighted
+let oneof_array_weighted ?print ?small a = make ?print ?small (Gen.oneof_array_weighted a)
+let frequencya = oneof_array_weighted
 
 let map_same_type f a =
   adapt_ a (fun st -> f (a.gen st))
@@ -1803,9 +1855,9 @@ module TestResult = struct
   let get_count = QCheck2.TestResult.get_count
   let get_count_gen = QCheck2.TestResult.get_count_gen
   let get_state = QCheck2.TestResult.get_state
-  let stats = QCheck2.TestResult.stats
-  let collect = QCheck2.TestResult.collect
-  let warnings = QCheck2.TestResult.warnings
+  let stats = QCheck2.TestResult.get_stats
+  let collect = QCheck2.TestResult.get_collect
+  let warnings = QCheck2.TestResult.get_warnings
   let is_success = QCheck2.TestResult.is_success
 end
 
